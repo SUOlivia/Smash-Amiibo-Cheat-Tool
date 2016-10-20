@@ -4,9 +4,9 @@ Based off the libctru NFC example
 
 ## Menu
 Hack: Simple and quick way to buff your amiibo's stats to 200 everywhere
-Restore backup: Restore a backup if previously backed up by the "Hack" function or the "Only dump appdata function"
+Restore backup: Restore a backup if previously backed up by the `Hack` function or the `Only dump appdata function`
 Only dump appdata: Only dumps a backup file
-Custom file writing: Writes "/Smash amiibo cheat tool/write.amiibo" to the amiibo
+Custom file writing: Writes `/Smash amiibo cheat tool/write.amiibo` to the amiibo
 
 ## Tagstates
 1: Stopped scanning for Amiibos/NFC tags
