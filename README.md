@@ -1,4 +1,4 @@
-# Smash-Amiibo-Cheat-Tool
+# Smash Amiibo Cheat Tool
 Hack your amiibos in a tap.
 Based off the libctru NFC example
 
