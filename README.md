@@ -19,7 +19,7 @@ Custom file writing: Writes `/Smash amiibo cheat tool/write.amiibo` to the amiib
 
 3: An Amiibo/NFC tag has been found
 
-4: Usually happens tagstate 3, Amiibo/NFC tag out of range
+4: Usually happens after tagstate 3, Amiibo/NFC tag out of range
 
 5: The Amiibo's/NFC tag's data successfully loaded
 
