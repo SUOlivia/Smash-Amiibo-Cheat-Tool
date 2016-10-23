@@ -33,6 +33,10 @@ Custom file writing: Writes `/Smash amiibo cheat tool/write.amiibo` to the amiib
 0x00000000: Everything's fine
 
 ## Credits
+​
+s
+YeYeyYeTellows8 : Documentation on smash amiibo data
+
 MarcusD: Helping me with some code issues
 
 Thunder Kai: All the graphics
