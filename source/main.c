@@ -7,9 +7,13 @@
 
 #include "menu.h"
 
-#define VERSION "Beta 4.0" // Version string
+#define VERSION "1.1" // Version string
 
 #define FB_SIZE 230400 // Bottom framebuffer size
+
+int Devmode = 0;
+
+int MenuIndex;
 
 u32 amiibo_appid = 0x10110E00; // Hardcoded for Super Smash Bros. See https://www.3dbrew.org/wiki/Amiibo for more details
 
@@ -17,16 +21,53 @@ static char *fb_buffer = NULL;
 
 void wait_for_start()
 {
-	printf("Press START to continue\n");
+	
+	printf("Press START to continue or L+R to launch smash\n");
 	while (aptMainLoop())
 	{
 		gspWaitForVBlank();
 		hidScanInput();
-
+		gfxFlushBuffers();
+		
 		u32 kDown = hidKeysDown();
 		
+			if(kDown & KEY_L && kDown & KEY_R)
+			{
+				char region_Info[512] = "Welcome to the smash launcher, Select one of these 3 regions to continue.";
+				char format_Info[512] = "Now select the format of your smash 3ds copy.";
+				
+				u64 titleID;
+				
+				const char *format_entries[] =
+				{
+					"Cartridge",
+					"CIA/Downloaded"
+				};				
+				
+				const char *region_entries[] =
+				{
+					"USA",
+					"EUR",
+					"JPN"
+				};
+				
+				int region=display_menu(region_entries, 3, region_Info);
+				u8 format=display_menu(format_entries, 2, format_Info);
+				
+				if(region==1)titleID=0x00040000000EDF00;
+				else if(region==2)titleID=0x00040000000EE000;
+				else titleID=0x00040000000b8b00;
+				
+				consoleClear();
+				printf("Now launching Smash");
+				NS_RebootToTitle(format, titleID);
+			}
+
+		
 		if (kDown & KEY_START)
+		{
 			break; // break in order to return to hbmenu
+		}
 	}
 }
 
@@ -128,7 +169,7 @@ Result nfc_main()
 		"based off the libctru NFC example\nSelect Hack to hack your amiibo\n" \
 		"Restore to restore a previous backup\nPlease note that the amiibo needs to:\n" \
 		" - previously been setup for this tool to work\n" \
-		"If you're on O3ds you need the NFC reader/writer\nto already been connected before you select\n"
+		"You need the NFC reader/writer\nand a9lh/CFW for this tool to work on O3ds\n"
 		"Console: %s\n\n", get_model_string(model));
 
 	ret = nfcStartScanning(NFC_STARTSCAN_DEFAULTINPUT);
@@ -152,8 +193,9 @@ Result nfc_main()
 
 	prevstate = curstate;
 	
-	int MenuIndex = display_menu(menu_entries, 4, Info);
+	MenuIndex = display_menu(menu_entries, 4, Info);
 	consoleClear();
+	if(MenuIndex==-1)return -1;
 	
 	while(aptMainLoop())
 	{
@@ -167,8 +209,18 @@ Result nfc_main()
 		u32 kDown = hidKeysDown();
 
 		if(kDown & KEY_B)break;
-		
-		memcpy(gfxGetFramebuffer(GFX_BOTTOM, GFX_LEFT, NULL, NULL), fb_buffer, FB_SIZE);
+		if(kDown & KEY_Y)
+		{
+		nfcStopScanning();
+		nfcStartScanning(NFC_STARTSCAN_DEFAULTINPUT);
+		MenuIndex = display_menu(menu_entries, 4, Info);
+		consoleClear();
+		}
+		if(kDown & KEY_SELECT)
+		{
+			Devmode = 1;
+			printf("Welcome to the Devmode, all it does is launch a Smash US cart");
+		}
 		nfcGetTagState(&curstate);
 		if(curstate!=prevstate)//See nfc.h for the TagState values.
 		{
@@ -258,9 +310,6 @@ Result nfc_main()
 					snprintf(backupstr, sizeof(backupstr)-1, "%s/Backup.amiibo", path);
 					mkdir("/Smash Amiibo Cheat Tool", 0777);
 					mkdir(path, 0777);
-					
-					if(1)
-					{
 						
 						if(MenuIndex==0)
 						{
@@ -294,11 +343,11 @@ Result nfc_main()
 							backup = fopen(backupstr, "w");
 							fwrite(appdata, 1, sizeof(appdata), backup);
 							fclose(backup);
-							printf("Finished, appdata dump is located at '%s'", backupstr);
+							printf("Finished, appdata dump is located at '%s'\n", backupstr);
 						}
 						else
 						{
-							printf("Writing '/Smash Amiibo Cheat Tool/Write.amiibo' to amiibo");
+							printf("Writing '/Smash Amiibo Cheat Tool/Write.amiibo' to amiibo\n");
 							f = fopen("/Smash Amiibo Cheat Tool/Write.amiibo", "r");
 						}
 						
@@ -344,15 +393,16 @@ Result nfc_main()
 						printf("Writing finished.\n");
 						fclose(f);
 					}
-					if(model==0) printf("You can now safely remove your amiibo from the NFC reader/writer");
-					else printf("You can now safely remove your amiibo from the touchscreen");
+					if((model == 2) || (model == 4)) printf("You can now safely remove your amiibo from the touchscreen\n");
+					else printf("You can now safely remove your amiibo from the NFC reader/writer\n");
 					
 					}
-					}
+					
 				}
 			
 			}
 		}
+		
 	}
 	return ret;
 	nfcStopScanning();
@@ -382,6 +432,7 @@ int main()
 	}
 	wait_for_start();
 
+	nfcExit();
 	romfsExit();
 	cfguExit();
 	gfxExit();
