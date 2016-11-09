@@ -1,28 +1,25 @@
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <3ds.h>
+#include "common.h"
 
-#include "menu.h"
+uint16_t swap_uint16(uint16_t val)
+{
+	return (val << 8) | (val >> 8);
+}
 
-#define VERSION "1.1" // Version string
+void Convert_Amiibo_Nickname(uint8_t *out, uint16_t *in)
+{
+	u32 i;
+	
+	uint16_t LE[0x16];
+	
+	for(i=0; i<22; i++)	LE[i]=swap_uint16(in[i]);
 
-#define FB_SIZE 230400 // Bottom framebuffer size
-
-int Devmode = 0;
-
-int MenuIndex;
-
-u32 amiibo_appid = 0x10110E00; // Hardcoded for Super Smash Bros. See https://www.3dbrew.org/wiki/Amiibo for more details
-
-static char *fb_buffer = NULL;
+	utf16_to_utf8(out, LE, sizeof(LE));
+}
 
 void wait_for_start()
 {
-	
-	printf("Press START to continue or L+R to launch smash\n");
+	stfuled();
+	printf("Press START to continue\n");
 	while (aptMainLoop())
 	{
 		gspWaitForVBlank();
@@ -30,39 +27,6 @@ void wait_for_start()
 		gfxFlushBuffers();
 		
 		u32 kDown = hidKeysDown();
-		
-			if(kDown & KEY_L && kDown & KEY_R)
-			{
-				char region_Info[512] = "Welcome to the smash launcher, Select one of these 3 regions to continue.";
-				char format_Info[512] = "Now select the format of your smash 3ds copy.";
-				
-				u64 titleID;
-				
-				const char *format_entries[] =
-				{
-					"Cartridge",
-					"CIA/Downloaded"
-				};				
-				
-				const char *region_entries[] =
-				{
-					"USA",
-					"EUR",
-					"JPN"
-				};
-				
-				int region=display_menu(region_entries, 3, region_Info);
-				u8 format=display_menu(format_entries, 2, format_Info);
-				
-				if(region==1)titleID=0x00040000000EDF00;
-				else if(region==2)titleID=0x00040000000EE000;
-				else titleID=0x00040000000b8b00;
-				
-				consoleClear();
-				printf("Now launching Smash");
-				NS_RebootToTitle(format, titleID);
-			}
-
 		
 		if (kDown & KEY_START)
 		{
@@ -91,6 +55,7 @@ int load_splash(char *buffer, const char *path)
 
 void WriteValTo(FILE *file, s32 address, u8 val)
 {
+	rewind(file);
 	fseek(file, address, SEEK_SET);
 	fwrite(&val, 1, 1, file);
 }
@@ -116,7 +81,7 @@ Result nfc_main()
 {
 	Result ret = 0;
 	FILE *f = NULL, *backup = NULL;
-
+	
 	fb_buffer = malloc(FB_SIZE);
 	if (!fb_buffer)
 	{
@@ -154,14 +119,17 @@ Result nfc_main()
 	u32 appdata_initialized;
 
 	u8 appdata[0xd8];
-
+	
+	uint8_t Name[0x16];
+	
 	char uidstr[16], tmpstr[262], backupstr[262], path[262], Info[512];
 	const char *menu_entries[] =
 	{
 		"Hack",
 		"Restore Backup",
 		"Only dump appdata",
-		"Custom file writing"
+		"Custom file writing",
+		"Change custom moves"
 	};
 
 	snprintf(Info, sizeof(Info) - 1,
@@ -193,19 +161,22 @@ Result nfc_main()
 
 	prevstate = curstate;
 	
-	MenuIndex = display_menu(menu_entries, 4, Info);
+	MenuIndex = display_menu(menu_entries, 5, Info);
 	consoleClear();
-	if(MenuIndex==-1)return -1;
+	if(MenuIndex==-1)return MenuIndex;
+	
+	fixcolor(255, 125, 0);
 	
 	while(aptMainLoop())
 	{
 		gspWaitForVBlank();
-		memcpy(gfxGetFramebuffer(GFX_BOTTOM, GFX_LEFT, NULL, NULL), fb_buffer, FB_SIZE);
 		gfxFlushBuffers();
 		gfxSwapBuffers();
 		
 		hidScanInput();
 
+		memcpy(gfxGetFramebuffer(GFX_BOTTOM, GFX_LEFT, NULL, NULL), fb_buffer, FB_SIZE);
+		
 		u32 kDown = hidKeysDown();
 
 		if(kDown & KEY_B)break;
@@ -213,13 +184,12 @@ Result nfc_main()
 		{
 		nfcStopScanning();
 		nfcStartScanning(NFC_STARTSCAN_DEFAULTINPUT);
-		MenuIndex = display_menu(menu_entries, 4, Info);
+		stfuled();
+		MenuIndex = display_menu(menu_entries, 5, Info);
 		consoleClear();
-		}
-		if(kDown & KEY_SELECT)
-		{
-			Devmode = 1;
-			printf("Welcome to the Devmode, all it does is launch a Smash US cart");
+		if(MenuIndex==-1)return MenuIndex;
+		
+		fixcolor(255, 125, 0);
 		}
 		nfcGetTagState(&curstate);
 		if(curstate!=prevstate)//See nfc.h for the TagState values.
@@ -231,6 +201,8 @@ Result nfc_main()
 			{
 				printf("A NFC tag has been found\n");
 				
+				fixcolor(255, 0, 0);
+				
 				memset(&taginfo, 0, sizeof(NFC_TagInfo));
 				memset(&amiibosettings, 0, sizeof(NFC_AmiiboSettings));
 				nfcGetTagInfo(&taginfo);
@@ -238,9 +210,11 @@ Result nfc_main()
 				printf("NFC tag UID:\n");
 
 				memset(uidstr, 0, sizeof(uidstr));
+				
 				for(pos=0; pos<7; pos++)snprintf(&uidstr[pos*2], 3, "%02x", taginfo.id[pos]);
 				printf("%s\n", uidstr);
 
+				
 				ret = nfcLoadAmiiboData();
 				if(R_FAILED(ret))
 				{
@@ -257,6 +231,12 @@ Result nfc_main()
 					if(ret==NFC_ERR_AMIIBO_NOTSETUP)printf("This amiibo wasn't setup by the amiibo Settings applet.\n");
 					break;
 				}
+				else 
+				{
+					Convert_Amiibo_Nickname(Name, amiibosettings.nickname);
+					printf("Hello %s!!!!\n", Name);
+				}
+				
 			
 				ret = nfcGetAmiiboConfig(&amiiboconfig);
 				if(R_FAILED(ret))
@@ -265,7 +245,7 @@ Result nfc_main()
 					break;
 				}
 
-				printf("amiibo data successfully loaded.\n");
+				printf("%s's data successfully loaded.\n", Name);
 
 				printf("Opening appdata...\n");
 
@@ -305,7 +285,7 @@ Result nfc_main()
 					memset(backupstr, 0, sizeof(backupstr));
 					memset(path, 0, sizeof(path));
 					
-					snprintf(path, sizeof(path)-1, "/Smash Amiibo Cheat Tool/%s", uidstr);
+					snprintf(path, sizeof(path)-1, "/Smash Amiibo Cheat Tool/%s_%s", uidstr, Name);
 					snprintf(tmpstr, sizeof(tmpstr)-1, "%s/Modded.amiibo", path);
 					snprintf(backupstr, sizeof(backupstr)-1, "%s/Backup.amiibo", path);
 					mkdir("/Smash Amiibo Cheat Tool", 0777);
@@ -313,7 +293,7 @@ Result nfc_main()
 						
 						if(MenuIndex==0)
 						{
-						printf("Modifying the amiibo's data\n");
+						printf("Modifying the %s's data\n", Name);
 						f = fopen(tmpstr, "w");
 						backup = fopen(backupstr, "w");
 						fwrite(appdata, 1, sizeof(appdata), f);
@@ -322,13 +302,13 @@ Result nfc_main()
 						fclose(backup);
 						f = fopen(tmpstr, "r+b");
 						u8 val = 0xC8;
-						u8 nul = 0x00;
-						WriteValTo(f, 0x10, nul);
-						WriteValTo(f, 0x11, val);
-						WriteValTo(f, 0x12, nul);
-						WriteValTo(f, 0x13, val);
-						WriteValTo(f, 0x14, nul);
-						WriteValTo(f, 0x15, val);
+						u8 nul = 0;
+						WriteValTo(f, 16, nul);
+						WriteValTo(f, 17, val);
+						WriteValTo(f, 18, nul);
+						WriteValTo(f, 19, val);
+						WriteValTo(f, 20, nul);
+						WriteValTo(f, 21, val);
 						
 						fclose(f);
 						f = fopen(tmpstr, "r");
@@ -345,12 +325,54 @@ Result nfc_main()
 							fclose(backup);
 							printf("Finished, appdata dump is located at '%s'\n", backupstr);
 						}
-						else
+						else if(MenuIndex==3)
 						{
-							printf("Writing '/Smash Amiibo Cheat Tool/Write.amiibo' to amiibo\n");
+							printf("Writing '/Smash Amiibo Cheat Tool/Write.amiibo' to %s\n", Name);
 							f = fopen("/Smash Amiibo Cheat Tool/Write.amiibo", "r");
+							if(f==NULL) 
+							{
+								fclose(f);
+								ERRF_ThrowResult(0xFFFFF);
+							}
 						}
+						else if(MenuIndex==4)
+						{
+							printf("hello");
+							f = fopen(tmpstr, "w");
+							backup = fopen(backupstr, "w");
+							fwrite(appdata, 1, sizeof(appdata), f);
+							fwrite(appdata, 1, sizeof(appdata), backup);
+							fclose(f);
+							fclose(backup);
+							f = fopen(tmpstr, "r+b");
+							void *buffer =  (char*) malloc (sizeof(char)*2);
+							char Info2[255];
+							const char *MoveEntries[] =
+							{
+								"1",
+								"2",
+								"3"
+							};
+							fseek(f, 9, SEEK_SET);
+							snprintf(Info2, 254, "Neutral: %u", fread(buffer, 1, 1, f));
+							int MoveIndex = display_menu(MoveEntries, 3, Info2);
+							WriteValTo(f, 9, MoveIndex);
+							fseek(f, 10, SEEK_SET);
+							snprintf(Info2, 254, "Side: %u", fread(buffer, 1, 1, f));
+							MoveIndex = display_menu(MoveEntries, 3, Info2);
+							WriteValTo(f, 10, MoveIndex);
+							fseek(f, 11, SEEK_SET);
+							snprintf(Info2, 254, "Up: %u", fread(buffer, 1, 1, f));
+							MoveIndex = display_menu(MoveEntries, 3, Info2);
+							WriteValTo(f, 11, MoveIndex);
+							fseek(f, 12, SEEK_SET);
+							snprintf(Info2, 254, "Down: %u", fread(buffer, 1, 1, f));
+							MoveIndex = display_menu(MoveEntries, 3, Info2);				
+							WriteValTo(f, 12, MoveIndex);
 						
+							fclose(f);
+							f = fopen(tmpstr, "r");
+						}
 						
 						if(MenuIndex!=2)
 						{
@@ -366,7 +388,7 @@ Result nfc_main()
 								break;
 							}
 
-							printf("Writing to the amiibo NFC tag...\n");
+							printf("Writing to %s...\n", Name);
 
 							ret = nfcUpdateStoredAmiiboData();
 							if(R_FAILED(ret))
@@ -393,9 +415,9 @@ Result nfc_main()
 						printf("Writing finished.\n");
 						fclose(f);
 					}
-					if((model == 2) || (model == 4)) printf("You can now safely remove your amiibo from the touchscreen\n");
-					else printf("You can now safely remove your amiibo from the NFC reader/writer\n");
-					
+					if((model == 2) || (model == 4)) printf("You can now safely remove %s from the touchscreen\n", Name);
+					else printf("You can now safely remove %s from the NFC reader/writer\n", Name);
+					fixcolor(0, 255, 0);
 					}
 					
 				}
@@ -417,6 +439,12 @@ int main()
 	romfsInit();
 
 	consoleInit(GFX_TOP, NULL);
+
+	swkbdInit(&swkbd, SWKBD_TYPE_NUMPAD, 2, sizeof(input_str));
+	swkbdSetPasswordMode(&swkbd, SWKBD_PASSWORD_NONE);
+	swkbdSetValidation(&swkbd, SWKBD_ANYTHING, 0, 4);
+	swkbdSetFeatures(&swkbd, SWKBD_DEFAULT_QWERTY);
+	swkbdSetNumpadKeys(&swkbd, 0, 0);
 	
 	ret = nfcInit(NFC_OpType_NFCTag);
 	if(R_FAILED(ret))
@@ -431,7 +459,8 @@ int main()
 		nfcExit();
 	}
 	wait_for_start();
-
+	
+	stfuled();
 	nfcExit();
 	romfsExit();
 	cfguExit();
