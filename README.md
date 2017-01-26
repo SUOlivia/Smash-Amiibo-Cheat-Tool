@@ -6,11 +6,13 @@ Based off the libctru NFC example
 ## Menu
 Hack: Simple and quick way to buff your amiibo's stats to 200 everywhere
 
-Restore backup: Restore a backup if previously backed up by the `Hack` function or the `Only dump appdata function`
+Restore Backup / Bruteforce appdata writing: Restore a backup if previously backed up by the `Hack` function or the `Only dump appdata` function / Writes a modified appdata to the bruteforced amiibo
 
-Only dump appdata: Only dumps a backup file
+Only dump appdata / Bruteforce appdata dump: Only dumps a backup file / Dumps the appdate of the bruteforced amiibo
 
 Custom file writing: Writes `/Smash amiibo cheat tool/write.amiibo` to the amiibo
+
+Appdata Randomizing: Randomizes the appdata of your amiibo (bruteforcing supported), this can be used for grinding rewards in smash for example 
 
 ## Tagstates
 1: Stopped scanning for Amiibos/NFC tags
@@ -40,3 +42,5 @@ MarcusD: Helping me with some code issues
 Thunder Kai: All the graphics
 
 Yudowat, CloudedSun, Fug/leni, jasgx, Karma, LinkSoraZelda, Swiftloke and Y2K: Testing and ideas
+
+## IT IS IMPOSSIBLE TO MODIFY THE AMIIBO'S IDENTITY

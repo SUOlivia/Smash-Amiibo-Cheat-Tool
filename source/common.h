@@ -6,11 +6,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <3ds.h>
+#include <time.h>
 
 #include "menu.h"
 #include "LED.h"
 
-#define VERSION "1.3" // Version string
+#define VERSION "2.0" // Version string
 #define FB_SIZE 230400 // Bottom framebuffer size
 
 static SwkbdState swkbd;
@@ -18,11 +19,9 @@ char input_str[4];
 
 int MenuIndex;
 
-u32 amiibo_appid = 0x10110E00; // Hardcoded for Super Smash Bros. See https://www.3dbrew.org/wiki/Amiibo for more details
+u32 amiibo_appid = 0x10110E00, bruteforce = 0x10000000, seconds;
 
 static char *fb_buffer = NULL;
 
 
-u8 attack=201;
-u8 defense=201;
-u8 speed=201;
+u8 attack=201, defense=201, speed=201;

@@ -29,21 +29,17 @@ void wait_for_start()
 		u32 kDown = hidKeysDown();
 		
 		if (kDown & KEY_START)
-		{
-			break; // break in order to return to hbmenu
-		}
+			break;
 	}
 }
 
-int load_splash(char *buffer, const char *path)
+int load_splash(char *buffer, FILE *f)
 {
 	if (!buffer)
 	{
 		printf("Memory not allocated!\n");
 		return -1;
 	}
-	FILE *f = fopen(path, "rb");
-	if (!f) return -2;
 	fseek(f, 0L, SEEK_END);
 	size_t sz = ftell(f);
 	rewind(f);
@@ -80,7 +76,7 @@ const char *get_model_string(uint32_t id)
 Result nfc_main()
 {
 	Result ret = 0;
-	FILE *f = NULL, *backup = NULL;
+	FILE *f = NULL, *backup = NULL, *Scan = NULL;
 	
 	fb_buffer = malloc(FB_SIZE);
 	if (!fb_buffer)
@@ -92,44 +88,56 @@ Result nfc_main()
 	u8 model;
 	CFGU_GetSystemModel(&model);
 
-	if ((model == 2) || (model == 4))
+	Scan = fopen("/SACT/Scan.bin", "rb");
+	
+	if (!Scan)
 	{
-		if (load_splash(fb_buffer, "romfs:/scan_n3ds.bin"))
-		{
+		if ((model == 2) || (model == 4)) 
+			Scan = fopen("romfs:/scan_n3ds.bin", "rb");
+		else
+			Scan = fopen("romfs:/scan_o3ds.bin", "rb");
+	}
+	
+	if (load_splash(fb_buffer, Scan))
+	{
 			printf("Failed to load splash!\n");
 			return -4;
-		}
 	}
-	else
-	{
-		if (load_splash(fb_buffer, "romfs:/scan_o3ds.bin"))
-		{
-			printf("Failed to load splash!\n");
-			return -4;
-		}
-	}
-
-
+	
 	NFC_TagState prevstate, curstate;
 	NFC_TagInfo taginfo;
 	NFC_AmiiboSettings amiibosettings;
 	NFC_AmiiboConfig amiiboconfig;
 
 	u32 pos;
+	u32 index = 0;
 	u32 appdata_initialized;
+	u32 secret_code[] =
+	{
+		KEY_UP,
+		KEY_UP,
+		KEY_DOWN,
+		KEY_DOWN,
+		KEY_LEFT,
+		KEY_RIGHT,
+		KEY_LEFT,
+		KEY_RIGHT,
+		KEY_START
+	};
 
 	u8 appdata[0xd8];
 	
 	uint8_t Name[0x16];
 	
-	char uidstr[16], tmpstr[262], backupstr[262], path[262], Info[512];
+	char uidstr[16], tmpstr[262], backupstr[262], path[262], Info[512], bruteforce_appdata[262];
 	const char *menu_entries[] =
 	{
-		"Hack",
-		"Restore Backup",
-		"Only dump appdata",
-		"Custom file writing",
-		"Change custom moves"
+		"Hack", // Menuindex 0
+		"Restore Backup / Bruteforce appdata writing", // MenuIndex 1, MenuIndex -6 if bruteforcing
+		"Only dump appdata / Bruteforce appdata dump", // MenuIndex 2, MenuIndex -5 if bruteforcing
+		"Custom file writing", // MenuIndex 3
+		"Change custom moves", // MenuIndex 4
+		"Appdata Randomizing"  //MenuIndex 5
 	};
 
 	snprintf(Info, sizeof(Info) - 1,
@@ -161,7 +169,7 @@ Result nfc_main()
 
 	prevstate = curstate;
 	
-	MenuIndex = display_menu(menu_entries, 5, Info);
+	MenuIndex = display_menu(menu_entries, 6, Info);
 	consoleClear();
 	if(MenuIndex==-1)return MenuIndex;
 	
@@ -185,12 +193,23 @@ Result nfc_main()
 		nfcStopScanning();
 		nfcStartScanning(NFC_STARTSCAN_DEFAULTINPUT);
 		stfuled();
-		MenuIndex = display_menu(menu_entries, 5, Info);
+		index = 0;
+		MenuIndex = display_menu(menu_entries, 6, Info);
 		consoleClear();
 		if(MenuIndex==-1)return MenuIndex;
-		
 		fixcolor(255, 125, 0);
 		}
+		
+		if(kDown & secret_code[index] && MenuIndex==0)
+		{
+			if(index==8) 
+			{
+				MenuIndex = 99;
+				printf("Cool, you discovered the 'secret' code :P\n");
+			}
+			else index++;
+		}
+		
 		nfcGetTagState(&curstate);
 		if(curstate!=prevstate)//See nfc.h for the TagState values.
 		{
@@ -251,7 +270,38 @@ Result nfc_main()
 
 				appdata_initialized = 1;
 
-				ret = nfcOpenAppData(amiibo_appid);
+				if(MenuIndex != 1 && MenuIndex != 2  && MenuIndex != 5) ret = nfcOpenAppData(amiibo_appid);
+				else
+				{
+					ret = nfcOpenAppData(amiibo_appid);
+					if(ret==NFC_ERR_APPID_MISMATCH)
+					{
+						if(MenuIndex == 1) MenuIndex = -6; else if(MenuIndex == 2) MenuIndex = -5;
+						clock_t t = clock();
+						printf("AppID isn't Sm4sh, currently bruteforcing AppID\n");
+						stfuled();
+						rave();
+						while(bruteforce != 0xFFFFFFFF)
+						{
+							ret = nfcOpenAppData(bruteforce);
+							nfcGetTagState(&curstate);
+							if(ret==NFC_ERR_APPID_MISMATCH) bruteforce++;
+							else if(curstate == NFC_TagState_OutOfRange)
+								{
+									printf("Why did you remore your amiibo >:3\n");
+									return 0xC0FFE1;
+								}
+							else
+							{
+								clock_t t2 = clock() - t;
+								seconds = t2 / CLOCKS_PER_SEC;
+								printf("AppID match found\nThe AppID of your amiibo is: 0x%X\nIt took %u seconds to find the AppID\n", bruteforce, seconds);
+								break;
+							}
+						}
+					}
+					
+				}
 				if(R_FAILED(ret))
 				{
 					printf("Failed to open the appdata.\n");
@@ -275,6 +325,7 @@ Result nfc_main()
 					printf("Reading appdata...\n");
 
 					ret = nfcReadAppData(appdata, sizeof(appdata));
+
 					if(R_FAILED(ret))
 					{
 						printf("nfcReadAppData() failed.\n");
@@ -284,15 +335,29 @@ Result nfc_main()
 					memset(tmpstr, 0, sizeof(tmpstr));
 					memset(backupstr, 0, sizeof(backupstr));
 					memset(path, 0, sizeof(path));
+					memset(bruteforce_appdata, 0, sizeof(bruteforce_appdata));
 					
-					snprintf(path, sizeof(path)-1, "/Smash Amiibo Cheat Tool/%s_%s", uidstr, Name);
+					snprintf(path, sizeof(path)-1, "/SACT/%s_%s", uidstr, Name);
 					snprintf(tmpstr, sizeof(tmpstr)-1, "%s/Modded.amiibo", path);
 					snprintf(backupstr, sizeof(backupstr)-1, "%s/Backup.amiibo", path);
-					mkdir("/Smash Amiibo Cheat Tool", 0777);
+					snprintf(bruteforce_appdata, sizeof(bruteforce_appdata)-1, "%s/%X.amiibo", path, bruteforce);
+					mkdir("/SACT", 0777);
 					mkdir(path, 0777);
-						
-						if(MenuIndex==0)
-						{
+					
+					if(MenuIndex!=1 && MenuIndex!=2 && MenuIndex!=3 && MenuIndex!=-6)
+					{
+						if(fopen(tmpstr, "r") != NULL)
+							remove(tmpstr); 
+						else
+							if(bruteforce!=0x10000000 && fopen(bruteforce_appdata, "r") != NULL)
+								remove(bruteforce_appdata);
+					}
+					if(MenuIndex!=1 && MenuIndex!=3 && MenuIndex!=-5 && MenuIndex!=-6) 
+						if(fopen(backupstr, "r") != NULL)
+							remove(backupstr);
+					
+					if(MenuIndex==0)
+					{
 						printf("Modifying the %s's data\n", Name);
 						f = fopen(tmpstr, "w");
 						backup = fopen(backupstr, "w");
@@ -312,75 +377,126 @@ Result nfc_main()
 						
 						fclose(f);
 						f = fopen(tmpstr, "r");
-						}
-						else if(MenuIndex==1)
+					}
+					else if(MenuIndex==1)
+					{
+						printf("Restauring backup\n");
+						f = fopen(backupstr, "r");
+					}
+					else if(MenuIndex==2)
+					{
+						backup = fopen(backupstr, "w");
+						fwrite(appdata, 1, sizeof(appdata), backup);
+						fclose(backup);
+						printf("Finished, appdata dump is located at '%s'\n", backupstr);
+					}
+					else if(MenuIndex==3)
+					{
+						printf("Writing '/SACT/Write.amiibo' to %s\n", Name);
+						f = fopen("/SACT/Write.amiibo", "r");
+						if(f==NULL) ERRF_ThrowResult(0xFFFFF);
+					}
+					else if(MenuIndex==4)
+					{
+						printf("hello");
+						f = fopen(tmpstr, "w");
+						backup = fopen(backupstr, "w");
+						fwrite(appdata, 1, sizeof(appdata), f);
+						fwrite(appdata, 1, sizeof(appdata), backup);
+						fclose(f);
+						fclose(backup);
+						f = fopen(tmpstr, "r+b");
+						void *buffer =  (char*) malloc (sizeof(char)*2);
+						char Info2[255];
+						const char *MoveEntries[] =
 						{
-							printf("Restauring backup\n");
-							f = fopen(backupstr, "r");
-						}
-						else if(MenuIndex==2)
-						{
-							backup = fopen(backupstr, "w");
-							fwrite(appdata, 1, sizeof(appdata), backup);
-							fclose(backup);
-							printf("Finished, appdata dump is located at '%s'\n", backupstr);
-						}
-						else if(MenuIndex==3)
-						{
-							printf("Writing '/Smash Amiibo Cheat Tool/Write.amiibo' to %s\n", Name);
-							f = fopen("/Smash Amiibo Cheat Tool/Write.amiibo", "r");
-							if(f==NULL) 
-							{
-								fclose(f);
-								ERRF_ThrowResult(0xFFFFF);
+							"1",
+							"2",
+							"3"
+						};
+						fseek(f, 9, SEEK_SET);
+						snprintf(Info2, 254, "Neutral: %u", fread(buffer, 1, 1, f));
+						int MoveIndex = display_menu(MoveEntries, 3, Info2);
+						WriteValTo(f, 9, MoveIndex);
+						fseek(f, 10, SEEK_SET);
+						snprintf(Info2, 254, "Side: %u", fread(buffer, 1, 1, f));
+						MoveIndex = display_menu(MoveEntries, 3, Info2);
+						WriteValTo(f, 10, MoveIndex);
+						fseek(f, 11, SEEK_SET);
+						snprintf(Info2, 254, "Up: %u", fread(buffer, 1, 1, f));
+						MoveIndex = display_menu(MoveEntries, 3, Info2);
+						WriteValTo(f, 11, MoveIndex);
+						fseek(f, 12, SEEK_SET);
+						snprintf(Info2, 254, "Down: %u", fread(buffer, 1, 1, f));
+						MoveIndex = display_menu(MoveEntries, 3, Info2);				
+						WriteValTo(f, 12, MoveIndex);
+						
+						fclose(f);
+						f = fopen(tmpstr, "r");
+					}
+					else if(MenuIndex==-5)
+					{
+						backup = fopen(bruteforce_appdata, "w");
+						fwrite(appdata, 1, sizeof(appdata), backup);
+						fclose(backup);
+						printf("Finished, appdata dump is located at '%s'\n", bruteforce_appdata);							
+					}
+					else if(MenuIndex==-6)
+					{
+						printf("Writing %s to %s\n", bruteforce_appdata, Name);
+						f = fopen(bruteforce_appdata, "r");
+						if(f==NULL) ERRF_ThrowResult(0xFFFFF);
+					}
+					if(MenuIndex==5)
+					{
+						printf("Randomizing %s's data\n", Name);
+						if(bruteforce  == 0x10000000) backup = fopen(backupstr, "w"); else backup = fopen(bruteforce_appdata, "w");
+						f = fopen(tmpstr, "w");
+						fwrite(appdata, 1, sizeof(appdata), f);
+						fwrite(appdata, 1, sizeof(appdata), backup);
+						fclose(f);
+						fclose(backup);
+						f = fopen(tmpstr, "r+b");
+						for(int ind = 0; ind<=215; ind++)
+							if(ind==0)
+								WriteValTo(f, 0, ind);
+							else
+							{ 
+								srand(time(NULL));
+								WriteValTo(f, ind, (u8)rand());
 							}
-						}
-						else if(MenuIndex==4)
-						{
-							printf("hello");
-							f = fopen(tmpstr, "w");
-							backup = fopen(backupstr, "w");
-							fwrite(appdata, 1, sizeof(appdata), f);
-							fwrite(appdata, 1, sizeof(appdata), backup);
-							fclose(f);
-							fclose(backup);
-							f = fopen(tmpstr, "r+b");
-							void *buffer =  (char*) malloc (sizeof(char)*2);
-							char Info2[255];
-							const char *MoveEntries[] =
-							{
-								"1",
-								"2",
-								"3"
-							};
-							fseek(f, 9, SEEK_SET);
-							snprintf(Info2, 254, "Neutral: %u", fread(buffer, 1, 1, f));
-							int MoveIndex = display_menu(MoveEntries, 3, Info2);
-							WriteValTo(f, 9, MoveIndex);
-							fseek(f, 10, SEEK_SET);
-							snprintf(Info2, 254, "Side: %u", fread(buffer, 1, 1, f));
-							MoveIndex = display_menu(MoveEntries, 3, Info2);
-							WriteValTo(f, 10, MoveIndex);
-							fseek(f, 11, SEEK_SET);
-							snprintf(Info2, 254, "Up: %u", fread(buffer, 1, 1, f));
-							MoveIndex = display_menu(MoveEntries, 3, Info2);
-							WriteValTo(f, 11, MoveIndex);
-							fseek(f, 12, SEEK_SET);
-							snprintf(Info2, 254, "Down: %u", fread(buffer, 1, 1, f));
-							MoveIndex = display_menu(MoveEntries, 3, Info2);				
-							WriteValTo(f, 12, MoveIndex);
+						fclose(f);
+						f = fopen(tmpstr, "r");
+					}
+					else if(MenuIndex==99)
+					{
+						printf("Modifying the %s's data\n", Name);
+						f = fopen(tmpstr, "w");
+						backup = fopen(backupstr, "w");
+						fwrite(appdata, 1, sizeof(appdata), f);
+						fwrite(appdata, 1, sizeof(appdata), backup);
+						fclose(f);
+						fclose(backup);
+						f = fopen(tmpstr, "r+b");
+						u8 val = 0x7F;
+						WriteValTo(f, 16, val);
+						WriteValTo(f, 17, val);
+						WriteValTo(f, 18, val);
+						WriteValTo(f, 19, val);
+						WriteValTo(f, 20, val);
+						WriteValTo(f, 21, val);
+					
+						fclose(f);
+						f = fopen(tmpstr, "r");
+					}
 						
-							fclose(f);
-							f = fopen(tmpstr, "r");
-						}
-						
-						if(MenuIndex!=2)
-						{
+					if(MenuIndex!=2 && MenuIndex!=-5)
+					{
 						fread(appdata, 1, sizeof(appdata), f);
 						if(appdata_initialized)
 						{
 							printf("Writing the modifications...\n");
-
+					
 							ret = nfcWriteAppData(appdata, sizeof(appdata), &taginfo);
 							if(R_FAILED(ret))
 							{
@@ -408,23 +524,18 @@ Result nfc_main()
 								break;
 							}
 						}
-
-						
-					if(MenuIndex!=2)
+					}	
+					if(MenuIndex!=2 && MenuIndex!=-5)
 					{
 						printf("Writing finished.\n");
 						fclose(f);
 					}
 					if((model == 2) || (model == 4)) printf("You can now safely remove %s from the touchscreen\n", Name);
 					else printf("You can now safely remove %s from the NFC reader/writer\n", Name);
-					fixcolor(0, 255, 0);
-					}
-					
+					fixcolor(0, 255, 0);				
 				}
-			
 			}
 		}
-		
 	}
 	return ret;
 	nfcStopScanning();
